@@ -1,0 +1,21 @@
+# dependencies and builds
+node_modules/
+dist/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# personal media, generated output, renders (default films root)
+/films/
+*.part
+.shotloom/
+
+# test scratch output
+tests/.tmp/
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log

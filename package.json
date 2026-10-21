@@ -1,0 +1,41 @@
+{
+  "name": "shotloom",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local, folder-based image-to-video film editor.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Z11nx/shotloom.git"
+  },
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "dev:server": "bun run --watch server/main.ts",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "vite build && bun run server/main.ts",
+    "serve": "bun run server/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "check": "bun run scripts/check.ts",
+    "smoke:live": "bun run scripts/smoke-live.ts",
+    "launch": "bun run scripts/launch.ts",
+    "test:browser": "vite build && bun run tests/browser/editor.e2e.ts"
+  },
+  "dependencies": {
+    "@fal-ai/client": "^1.10.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "playwright-core": "1.56.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  }
+}
