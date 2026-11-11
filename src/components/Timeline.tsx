@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { clipDuration, effectiveTrim, findGeneration, type AspectRatio } from "../../shared/domain";
+import { BEATS_CHOICES, activeBeatSync, availableFromIn, beatGrid, fitsSlot, planBeatCuts } from "../../shared/beats";
+import { VIDEO_FPS, clipDuration, effectiveTrim, findGeneration, type AspectRatio, type BeatSync } from "../../shared/domain";
 import { api, mediaUrl, messageOf } from "../lib/api";
 import { useFilm } from "../lib/filmContext";
 import { secs } from "../lib/format";
+import { BeatControls, BeatStrip, useBeatAnalysis } from "./BeatSync";
 import { ExportIcon, MusicIcon, PlayIcon } from "./icons";
 
 export function Timeline() {
@@ -14,7 +16,24 @@ export function Timeline() {
   const busy = starting || render?.state === "running";
 
   const clips = timeline.map((c) => ({ clip: c, found: findGeneration(view.state, c.generationId) }));
-  const total = clips.reduce((sum, { found }) => sum + (found ? clipDuration(found.generation) : 0), 0);
+
+  // Cut to beat: the same plan the renderer uses (shared/beats.ts).
+  const sync = activeBeatSync(view.state);
+  const beats = useBeatAnalysis(film, soundtrack?.filename ?? null, sync !== null);
+  const plan = (() => {
+    if (!sync || beats.status !== "ready") return null;
+    const grid = beatGrid(beats.analysis, sync);
+    if (grid.times.length < 2 && sync.bpm === null) return null;
+    return planBeatCuts(grid, sync, timeline, VIDEO_FPS);
+  })();
+  const cutFor = new Map(plan?.cuts.map((c) => [c.clipId, c]));
+  const tooShortIds = new Set(
+    clips.filter(({ clip, found }) => found && cutFor.has(clip.id) && !fitsSlot(found.generation, cutFor.get(clip.id)!.frames / VIDEO_FPS, VIDEO_FPS)).map(({ clip }) => clip.id),
+  );
+  const total = plan ? plan.totalSec : clips.reduce((sum, { found }) => sum + (found ? clipDuration(found.generation) : 0), 0);
+  const saveBeatSync = async (label: string, next: BeatSync | null) => {
+    await run(label, () => api.setBeatSync(film, next));
+  };
 
   // Open a preview this tab asked for as soon as it finishes.
   const awaitingPreview = useRef<string | null>(null);
@@ -56,6 +75,7 @@ export function Timeline() {
         <h2>Timeline</h2>
         <span className="tabular muted timeline-meta" aria-label={`${timeline.length} clips, total length ${secs(total)}`}>
           {timeline.length} clip{timeline.length === 1 ? "" : "s"} · {tileClock(total)}
+          {plan && ` · ${plan.grid.bpm} BPM`}
         </span>
         <RenderLine film={film} notify={notify} />
         <div className="timeline-actions">
@@ -89,14 +109,18 @@ export function Timeline() {
         <ol className="clips" aria-label="Clips in order">
           {clips.map(({ clip, found }, i) => {
             const g = found?.generation;
-            const d = g ? clipDuration(g) : 0;
-            const trim = g ? effectiveTrim(g) : null;
+            const cut = cutFor.get(clip.id);
+            const d = cut ? cut.frames / VIDEO_FPS : g ? clipDuration(g) : 0;
+            const baseTrim = g ? effectiveTrim(g) : null;
+            // In beat mode a clip plays from its in-point for its beat slot.
+            const trim = baseTrim && cut ? { inSec: baseTrim.inSec, outSec: baseTrim.inSec + d } : baseTrim;
+            const tooShort = tooShortIds.has(clip.id);
             const label = found ? found.shot.filename : "Missing clip";
             const short = found ? label.replace(/\.[^.]+$/, "") : label;
             return (
               <li
                 key={clip.id}
-                className={`clip${dragId === clip.id ? " dragging" : ""}${clip.muted ? " muted-clip" : ""}`}
+                className={`clip${dragId === clip.id ? " dragging" : ""}${clip.muted ? " muted-clip" : ""}${tooShort ? " clip-short" : ""}`}
                 draggable
                 onDragStart={(e) => {
                   setDragId(clip.id);
@@ -128,6 +152,7 @@ export function Timeline() {
                 >
                   {g && <video src={`${mediaUrl.generation(film, g.id)}#t=${trim?.inSec ?? 0}`} muted preload="metadata" tabIndex={-1} />}
                   {clip.muted && <span className="clip-badge">Muted</span>}
+                  {tooShort && <span className="clip-badge clip-badge-warn">Too short</span>}
                 </button>
                 <div className="clip-tools">
                   <button type="button" className="tool-btn" aria-label={`Move clip ${i + 1} earlier`} title="Move earlier" disabled={i === 0} onClick={() => move(clip.id, -1)}>
@@ -161,13 +186,41 @@ export function Timeline() {
                   <span className="clip-name" title={label}>
                     <span className="clip-num tabular">{String(i + 1).padStart(2, "0")}</span> {short}
                   </span>
-                  <span className="tabular muted clip-dur">{tileClock(d)}</span>
+                  {cut && sync ? (
+                    <span
+                      className="clip-dur clip-beats tabular"
+                      title={
+                        tooShort && g
+                          ? `This clip has ${availableFromIn(g).toFixed(1)}s of video from its in-point, but ${cut.beats} beats need ${d.toFixed(1)}s. Choose fewer beats or move its in-point earlier.`
+                          : `Plays ${d.toFixed(1)}s from its in-point`
+                      }
+                    >
+                      <select
+                        className="beats-select"
+                        aria-label={`Beats for clip ${i + 1}`}
+                        value={clip.beats ?? ""}
+                        onChange={(e) => void run("Clip beats", () => api.setClipBeats(film, clip.id, e.target.value === "" ? null : Number(e.target.value)))}
+                      >
+                        <option value="">{sync.beatsPerClip} beat{sync.beatsPerClip === 1 ? "" : "s"}</option>
+                        {BEATS_CHOICES.map((n) => (
+                          <option key={n} value={n}>
+                            {n} beat{n === 1 ? "" : "s"}
+                          </option>
+                        ))}
+                      </select>
+                      · {tileClock(d)}
+                    </span>
+                  ) : (
+                    <span className="tabular muted clip-dur">{tileClock(d)}</span>
+                  )}
                 </div>
               </li>
             );
           })}
         </ol>
       )}
+
+      {plan && timeline.length > 0 && <BeatStrip plan={plan} short={tooShortIds} />}
 
       <div className="soundtrack-bar">
         <MusicIcon />
@@ -189,13 +242,14 @@ export function Timeline() {
             ))}
           </select>
         </label>
-        {soundtrack && (
+        {soundtrack && !sync && (
           <OffsetField
             key={`${soundtrack.filename}-${soundtrack.offsetSec}`}
             value={soundtrack.offsetSec}
             onCommit={(n) => void run("Soundtrack start", () => api.setSoundtrack(film, soundtrack.filename, n))}
           />
         )}
+        {soundtrack && <BeatControls film={film} soundtrack={soundtrack} sync={view.state.beatSync} beats={beats} save={saveBeatSync} />}
       </div>
     </section>
   );

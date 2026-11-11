@@ -137,6 +137,8 @@ queued ──upload──▶ submitting ──submit──▶ submitted ⇄ proc
   downloaded file is kept exactly as received, and clips generated earlier get
   the same treatment.
 - The soundtrack, if set, exists, has audio, and its offset falls inside it.
+- **Cut to beat** (when on): each clip has enough video from its in-point to
+  fill its beat slot (see below).
 
 `renderPlan` then:
 
@@ -151,6 +153,29 @@ queued ──upload──▶ submitting ──submit──▶ submitted ⇄ proc
    (`amix duration=first`, limiter), with a fade-out over
    `min(3 s, half the film)`. Output length is pinned to the timeline length,
    so a short soundtrack never shortens the video.
+
+### Cut to beat
+
+- **Detection** (`server/media/beatDetect.ts`, no dependencies). FFmpeg
+  decodes the soundtrack to mono 22.05 kHz. The onset strength is the
+  log-magnitude spectral flux per ~12 ms. Tempo is the strongest
+  autocorrelation lag, weighted toward ~120 BPM. Beats are tracked by dynamic
+  programming (Ellis 2007), and times are corrected for the analysis window's
+  10 ms lead.
+- **Confidence** is the onset strength's autocorrelation at one beat: high
+  for a steady pulse, near 0 for noise. Results are cached per file in
+  `.shotloom/beats/` (`server/media/beatService.ts`).
+- **Cut math** (`shared/beats.ts`, used by both the timeline UI and the
+  renderer). Film time 0 is the start beat, and the soundtrack starts there.
+  Clip *i* spans beats *k … k+n*. Each cut is `round((beat time − start) × 30)`
+  frames, computed from absolute beat times, so rounding never accumulates.
+  Beats past the end of the song continue at the typical beat length.
+- **Rendering.** Each segment is encoded to exactly its frame count: it reads
+  a little extra, pads by repeating the last frame if the source ends early,
+  and stops with `-frames:v`. The concatenation is therefore frame-exact.
+- **Tests** (`tests/beats.test.ts`) check detection on synthetic songs at
+  75–140 BPM (with swing, no drums, and tempo drift) and an export where the
+  colors switch on the exact frames and a drum hit sits on each cut.
 
 The result is written as `.part`, probed, then renamed. Exports go to
 `exports/` with unique names. Previews go to `.shotloom/preview/` with a fresh

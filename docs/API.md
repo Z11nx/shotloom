@@ -88,9 +88,11 @@ name, and `:id` a generation id.
 | --- | --- | --- | --- |
 | POST | `/api/films/:film/timeline` | `{ generationId }` (completed; once per generation) | FilmView |
 | PUT | `/api/films/:film/timeline/order` | `{ ids: clipId[] }` | FilmView |
-| PATCH | `/api/films/:film/timeline/:clipId` | `{ muted }` | FilmView |
+| PATCH | `/api/films/:film/timeline/:clipId` | `{ muted?, beats?: 1–32 \| null }` (at least one) | FilmView |
 | DELETE | `/api/films/:film/timeline/:clipId` | – | FilmView |
-| PUT | `/api/films/:film/soundtrack` | `{ filename \| null, offsetSec ≥ 0 }` | FilmView |
+| PUT | `/api/films/:film/soundtrack` | `{ filename \| null, offsetSec ≥ 0 }`. Choosing a different song resets the beat grid (start beat, tempo, nudge) and keeps the pace. | FilmView |
+| GET | `/api/films/:film/soundtrack/beats` | – | `BeatAnalysis` (`shared/beats.ts`): `bpm`, `beats` (seconds), `confidence` 0–1, `energy` per beat. Analyzed once per file and cached. 400 without a soundtrack. |
+| PUT | `/api/films/:film/beat-sync` | `{ beatSync: { enabled, beatsPerClip 1–32, startBeat, bpm \| null, scale 0.25–4, nudgeSec ±0.5 } \| null }` | FilmView |
 | PUT | `/api/films/:film/aspect-ratio` | `{ aspectRatio: "16:9" \| "1:1" \| "9:16" }` | FilmView |
 | POST | `/api/films/:film/render` | `{ kind: "preview" \| "export" }` | `RenderStatus` (202); progress appears in `FilmView.render` |
 

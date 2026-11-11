@@ -10,6 +10,78 @@ Ten runs are recorded here, newest first. **Run 10** makes clips match the
 requested length and removes the hairline side bars. Runs 9–1 are kept
 unchanged below it for comparison.
 
+## v0.2.0: cut to beat (2026-11-10, Linux sandbox)
+
+**Environment.** Linux sandbox, Bun 1.4.2, FFmpeg 6.1.1, bundled Chromium.
+Mock provider only, no fal requests. **Not yet run on Windows or with your
+own music.**
+
+**What changed.** A new "Cut to beat" mode in the soundtrack bar:
+- **Settings:** beats per clip (film default plus a per-clip override), start
+  beat, tempo (½ / ×2 / typed BPM), nudge, and a beat map under the clips.
+- **Export:** cuts are frame-exact on the song's beats.
+- **Short clips:** a clip without enough video for its slot is flagged on its
+  tile and in the beat map, and export refuses with the reason.
+
+New files: `server/media/beatDetect.ts`, `server/media/beatService.ts`,
+`shared/beats.ts`, `src/components/BeatSync.tsx`. Films saved by v0.1.0 load
+unchanged, with Cut to beat off.
+
+### Detection accuracy
+
+**Synthetic songs** with known beats (kick, snare, hats, bass, pad):
+- **Tempo** within 3% at 75, 92 (swing), 120, 128 (0.37 s lead-in), 140,
+  100 (no drums) and 110→116 BPM (drift).
+- **Beat timing:** ≥95% of beats within 35 ms, with mean bias under 8 ms after
+  the 10 ms latency correction.
+- **174 BPM** is reported as 174 or 87 (half time); either way every detected
+  beat is a real beat. The ½ / ×2 buttons cover this.
+- **No pulse:** noise, a sustained pad, random hits and silence all report
+  confidence below 0.35, which shows "Beats unclear".
+
+**Real recordings,** compared once against librosa 1.0 (installed in the
+sandbox for comparison only, not a dependency). Both are Creative Commons
+tracks from librosa's example set:
+- *Choice* (drum and bass): 136.3 vs 136.0 BPM, 98% of beats within 50 ms.
+- *Vibe Ace*: 129.9 vs 64.6 BPM, the same pulse counted at double tempo.
+
+### Results
+
+| Check | Result |
+| --- | --- |
+| `bun run check` | pass; `bun test` 163 pass (21 new in `tests/beats.test.ts`) |
+| Browser suite | **21 pass, 0 fail**: 20 earlier plus 1 new; the new one also passed 3 more times alone |
+
+**Export test** (real FFmpeg, 120 BPM song, clips of 2, 3 and 1 beats from
+beat 3):
+- Segments of exactly 30, 45 and 15 frames.
+- The color changes exactly at frames 30 and 75, checked by frame number.
+- The cut times are true beats of the song.
+- A drum hit sits within 35 ms of each cut in the exported audio.
+
+**Browser test:**
+- The checkbox responds immediately.
+- The tempo is detected (≈120), and the start beat replaces the free offset.
+- 4 clips × 4 beats = 00:08, and 2 beats per clip gives 00:04.
+- A 16-beat clip shows "Too short" on its tile and in the map, and export is
+  refused with the reason.
+- The start beat steps; tempo doubles and halves back.
+- Export is 14 beats = 7.0 s (±0.06).
+- Settings survive a reload, and turning it off restores the normal timeline.
+
+**Look.** Screenshots at 1774×887 and 1366×768 confirm the new controls use
+the existing styles (olive checkbox, ‹ › stepper, small selects and number
+fields, the line and olive colors), with the amber warning colors for a
+short clip. At 1366 px everything fits on one line. With Cut to beat off, the
+only visible change is the checkbox.
+
+### Not verified
+
+- **Your own songs.** Live recordings with drifting tempo or music without a
+  clear pulse may need a typed BPM or a nudge.
+- **On Windows/Edge.** 21 browser scenarios are expected.
+- **Long soundtracks.** Analysis covers the first 20 minutes of a file.
+
 ## Release prep for v0.1.0 (2026-10-20)
 
 No app behavior changed. Added the MIT `LICENSE`, `.gitattributes` (keeps

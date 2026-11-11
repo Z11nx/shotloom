@@ -4,7 +4,7 @@
  * See docs/API.md for the route table.
  */
 import { z } from "zod";
-import { AspectRatioSchema, GenerationSettingsSchema, TrimSchema, type FilmState } from "./domain";
+import { AspectRatioSchema, BeatSyncSchema, GenerationSettingsSchema, TrimSchema, type FilmState } from "./domain";
 import type { ModelDescriptor } from "./models";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,14 @@ export const GenerateBody = z.object({
 export const UpdateGenerationBody = z.object({ trim: TrimSchema.nullable() });
 
 export const AddClipBody = z.object({ generationId: z.string().min(1) });
-export const UpdateClipBody = z.object({ muted: z.boolean() });
+export const UpdateClipBody = z
+  .object({
+    muted: z.boolean().optional(),
+    /** Beat mode: this clip's length in beats; null = the film's default. */
+    beats: z.number().int().min(1).max(32).nullable().optional(),
+  })
+  .refine((b) => b.muted !== undefined || b.beats !== undefined, "Provide muted or beats.");
+export const BeatSyncBody = z.object({ beatSync: BeatSyncSchema.nullable() });
 export const SoundtrackBody = z.object({
   filename: z.string().min(1).nullable(),
   offsetSec: z.number().nonnegative().max(24 * 3600).default(0),

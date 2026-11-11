@@ -24,7 +24,7 @@ export interface AppConfig {
 }
 
 export const APP_NAME = "Shotloom";
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = "0.2.0";
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
   const appDir = path.resolve(import.meta.dir, "..");

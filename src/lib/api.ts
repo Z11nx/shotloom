@@ -3,7 +3,8 @@
  * throws ApiError with the server's message. No credentials ever live here.
  */
 import type { ApiErrorBody, FalBalanceResponse, FilmSummary, FilmView, GenerateResponse, RenderStatus, StatusResponse } from "../../shared/api";
-import type { AspectRatio, GenerationSettings, Trim } from "../../shared/domain";
+import type { BeatAnalysis } from "../../shared/beats";
+import type { AspectRatio, BeatSync, GenerationSettings, Trim } from "../../shared/domain";
 
 export class ApiError extends Error {
   constructor(
@@ -76,6 +77,10 @@ export const api = {
   reorderClips: (film: string, ids: string[]) => request<FilmView>("PUT", `${f(film)}/timeline/order`, { ids }),
   muteClip: (film: string, clipId: string, muted: boolean) =>
     request<FilmView>("PATCH", `${f(film)}/timeline/${enc(clipId)}`, { muted }),
+  setClipBeats: (film: string, clipId: string, beats: number | null) =>
+    request<FilmView>("PATCH", `${f(film)}/timeline/${enc(clipId)}`, { beats }),
+  beats: (film: string) => request<BeatAnalysis>("GET", `${f(film)}/soundtrack/beats`),
+  setBeatSync: (film: string, beatSync: BeatSync | null) => request<FilmView>("PUT", `${f(film)}/beat-sync`, { beatSync }),
   setSoundtrack: (film: string, filename: string | null, offsetSec: number) =>
     request<FilmView>("PUT", `${f(film)}/soundtrack`, { filename, offsetSec }),
   setAspect: (film: string, aspectRatio: AspectRatio) => request<FilmView>("PUT", `${f(film)}/aspect-ratio`, { aspectRatio }),

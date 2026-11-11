@@ -337,7 +337,7 @@ describe("history and deletion", () => {
     await settle(svc);
     const g = (await gens())[0]!;
     await store.mutate("F", (s) => {
-      s.timeline.push({ id: "c1", generationId: g.id, muted: false });
+      s.timeline.push({ id: "c1", generationId: g.id, muted: false, beats: null });
     });
     await rename(path.join(root, "F", "shot.png"), path.join(root, "away.png"));
     let { state } = await store.read("F");

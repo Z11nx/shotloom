@@ -95,7 +95,8 @@ your package manager.
 6. Use **Add to timeline**, then reorder by dragging or with the arrows. Mute
    clip audio per clip.
 7. Pick a **Soundtrack** from audio files in the film folder (MP3, WAV, M4A,
-   AAC, OGG, FLAC) and its start offset. Choose a **Frame**: 16:9, 1:1 or 9:16.
+   AAC, OGG, FLAC) and its start offset. Turn on **Cut to beat** to make every
+   cut land on the music's beat (below). Choose a **Frame**: 16:9, 1:1 or 9:16.
 8. **Preview** renders and plays the film. **Export** saves a numbered MP4 in
    the film's `exports` folder.
 
@@ -117,6 +118,32 @@ automatically (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 | `bun run build && bun run tests/browser/screens.ts tests/.tmp/screens` | Builds a disposable mock film and saves layout screenshots and measurements at 1774×887, 1920×1080 and 1366×768 |
 | `bun run test:browser` | Build, then run the browser regression scenarios in mock mode. Uses bundled Chromium if installed, otherwise Microsoft Edge or Chrome (set `SHOTLOOM_BROWSER` to a browser path to override) |
 | `bun run smoke:live -- image.jpg --yes-spend-money` | **Optional, paid:** one real 5 s / 480P fal request |
+
+## Cut to beat
+
+With a soundtrack chosen, tick **Cut to beat** in the soundtrack bar. Shotloom
+finds the song's beats (on your computer, once per song) and every clip then
+lasts a whole number of beats, so every cut lands on a beat.
+
+- **Pace.** "each clip" sets the default length in beats: fewer beats cut
+  faster, more beats slower. Change any one clip with the beat count on its
+  tile.
+- **Which part plays.** A clip plays from its in-point for its beat length;
+  its out-point is ignored in this mode. If it doesn't have enough video from
+  its in-point, the tile turns amber and says **Too short**, and export explains
+  what to change instead of freezing a frame.
+- **Where the film starts.** "starts on beat" picks the beat the film opens
+  on; it replaces the "starts at" offset while Cut to beat is on.
+- **Tempo.** The detected tempo is shown in BPM. **½** and **×2** count every
+  other beat or half-beats, typing a BPM sets an even grid, and **nudge**
+  shifts every cut slightly if they feel early or late. **Use detected beats**
+  undoes these. "Beats unclear" means the song has no steady pulse to find;
+  typing its tempo works best there.
+- The strip under the clips is a beat map: one section per clip, with the
+  beats marked (taller ticks are louder beats).
+
+Preview and export cut on exact video frames computed from the song's beat
+times, so the edit stays on the beat for the whole song.
 
 ## fal credits
 

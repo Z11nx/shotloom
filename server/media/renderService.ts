@@ -10,6 +10,8 @@ import { AppError, errorMessage, newId } from "../errors";
 import { exportsDir, previewDir, renderTmpDir } from "../films/layout";
 import type { FilmStore } from "../films/store";
 import type { MediaTools } from "./ffmpeg";
+import { activeBeatSync } from "../../shared/beats";
+import type { BeatService } from "./beatService";
 import { buildRenderPlan, cleanRenderScratch, renderPlan } from "./render";
 
 export class RenderService {
@@ -20,6 +22,7 @@ export class RenderService {
     private readonly store: FilmStore,
     private readonly tools: MediaTools,
     private readonly log: (m: string) => void = console.log,
+    private readonly beats: BeatService | null = null,
   ) {}
 
   status(film: string): RenderStatus | null {
@@ -41,7 +44,9 @@ export class RenderService {
     this.running = { film, id }; // claim before any await so two clicks cannot both start
     try {
       const { state, media } = await this.store.read(film);
-      const plan = await buildRenderPlan(this.store.root, film, state, media.audio, this.tools);
+      const sync = activeBeatSync(state);
+      const analysis = sync && state.soundtrack && this.beats ? await this.beats.get(film, state.soundtrack.filename) : null;
+      const plan = await buildRenderPlan(this.store.root, film, state, media.audio, this.tools, analysis);
       // Every folder this render writes to or clears must be inside the films root.
       const dirs = {
         tmp: await this.store.guard(renderTmpDir(this.store.root, film)),

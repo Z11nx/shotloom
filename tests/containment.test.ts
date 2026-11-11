@@ -112,7 +112,7 @@ async function filmWithClip(name: string): Promise<{ clip: string }> {
   await makeVideo(path.join(gdir, "g1.mp4"), { color: "blue", seconds: 2, audio: true, size: "640x360" });
   await app.store.mutate(name, (s) => {
     s.shots["shot.png"]!.generations.push(completedGeneration("g1", "shot.png"));
-    s.timeline = [{ id: "c1", generationId: "g1", muted: false }];
+    s.timeline = [{ id: "c1", generationId: "g1", muted: false, beats: null }];
   });
   return { clip: path.join(gdir, "g1.mp4") };
 }

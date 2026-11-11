@@ -63,8 +63,8 @@ beforeAll(async () => {
     s.shots["b.png"]!.generations.push(gen("blue", "b.png", blueDur, false, { inSec: 1, outSec: 2.5 }));
     // Order: blue first, then red.
     s.timeline = [
-      { id: "c-blue", generationId: "blue", muted: false },
-      { id: "c-red", generationId: "red", muted: false },
+      { id: "c-blue", generationId: "blue", muted: false, beats: null },
+      { id: "c-red", generationId: "red", muted: false, beats: null },
     ];
   });
 });
@@ -138,7 +138,7 @@ describe("requested length", () => {
     expect(longDur).toBeGreaterThan(5.2);
     const { out, probe } = await render((s) => {
       s.shots["a.png"]!.generations.push(gen("long", "a.png", longDur, true, null)); // settings ask for 5 s
-      s.timeline = [{ id: "c-long", generationId: "long", muted: false }];
+      s.timeline = [{ id: "c-long", generationId: "long", muted: false, beats: null }];
     }, "requested-length");
     expect(out).toBeTruthy();
     expect(Math.abs(probe.durationSec - 5)).toBeLessThan(0.05);
@@ -156,7 +156,7 @@ describe("timeline validation", () => {
     await expect(buildRenderPlan(root, "R", badTrim, media.audio, tools)).rejects.toThrow(/past the end/);
 
     const ghost = structuredClone(state);
-    ghost.timeline.push({ id: "x", generationId: "nope", muted: false });
+    ghost.timeline.push({ id: "x", generationId: "nope", muted: false, beats: null });
     await expect(buildRenderPlan(root, "R", ghost, media.audio, tools)).rejects.toThrow(/no longer exists/);
 
     const offset = structuredClone(state);

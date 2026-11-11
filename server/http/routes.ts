@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   AddClipBody,
   AspectRatioBody,
+  BeatSyncBody,
   CreateFilmBody,
   CreatePromptBlockBody,
   GenerateBody,
@@ -31,6 +32,7 @@ import { assertFileName, assertFilmName } from "../films/paths";
 import type { FilmStore } from "../films/store";
 import type { GenerationService } from "../generation/service";
 import type { RenderService } from "../media/renderService";
+import type { BeatService } from "../media/beatService";
 import type { StatusChecker } from "../system/status";
 import type { FalBalance } from "../system/falBalance";
 import type { FolderOpener } from "../system/opener";
@@ -41,6 +43,7 @@ export interface RouteDeps {
   store: FilmStore;
   generation: GenerationService;
   renders: RenderService;
+  beats: BeatService;
   status: StatusChecker;
   falBalance: FalBalance;
   openFolder: FolderOpener;
@@ -239,7 +242,7 @@ export function buildRouter(d: RouteDeps): Router {
       if (s.timeline.some((c) => c.generationId === generationId)) {
         throw conflict("ALREADY_ON_TIMELINE", "This clip is already on the timeline.");
       }
-      s.timeline.push({ id: newId(), generationId, muted: false });
+      s.timeline.push({ id: newId(), generationId, muted: false, beats: null });
     });
   });
 
@@ -251,11 +254,12 @@ export function buildRouter(d: RouteDeps): Router {
   });
 
   r.patch("/api/films/:film/timeline/:clipId", async (req, p) => {
-    const { muted } = await readBody(req, UpdateClipBody);
+    const body = await readBody(req, UpdateClipBody);
     return mutateView(film(p), (s) => {
       const clip = s.timeline.find((c) => c.id === p.clipId);
       if (!clip) throw notFound("That clip is no longer on the timeline.");
-      clip.muted = muted;
+      if (body.muted !== undefined) clip.muted = body.muted;
+      if (body.beats !== undefined) clip.beats = body.beats;
     });
   });
 
@@ -274,7 +278,27 @@ export function buildRouter(d: RouteDeps): Router {
       if (!media.audio.includes(body.filename)) throw badRequest(`"${body.filename}" is not an audio file in this film's folder.`);
     }
     return mutateView(name, (s) => {
+      // A different song has its own beats: start its grid fresh (keep the pace).
+      if (s.beatSync && body.filename !== s.soundtrack?.filename) {
+        s.beatSync = { ...s.beatSync, startBeat: 0, bpm: null, scale: 1, nudgeSec: 0 };
+      }
       s.soundtrack = body.filename === null ? null : { filename: body.filename, offsetSec: round3(body.offsetSec) };
+    });
+  });
+
+  // Beat analysis of the current soundtrack (analyzed once per file, then cached).
+  r.get("/api/films/:film/soundtrack/beats", async (_req, p) => {
+    const name = film(p);
+    const { state, media } = await d.store.read(name, { rescan: true });
+    if (!state.soundtrack) throw badRequest("Choose a soundtrack first.");
+    if (!media.audio.includes(state.soundtrack.filename)) throw notFound(`"${state.soundtrack.filename}" is no longer in the film folder.`);
+    return json(await d.beats.get(name, state.soundtrack.filename));
+  });
+
+  r.put("/api/films/:film/beat-sync", async (req, p) => {
+    const { beatSync } = await readBody(req, BeatSyncBody);
+    return mutateView(film(p), (s) => {
+      s.beatSync = beatSync === null ? null : { ...beatSync, nudgeSec: round3(beatSync.nudgeSec) };
     });
   });
 

@@ -151,6 +151,8 @@ export const TimelineClipSchema = z.object({
   id: z.string().min(1),
   generationId: z.string().min(1),
   muted: z.boolean(),
+  /** Beat mode: how many beats this clip lasts; null = the film's default. Added in 0.2; absent in older files. */
+  beats: z.number().int().min(1).max(32).nullable().default(null),
 });
 export type TimelineClip = z.infer<typeof TimelineClipSchema>;
 
@@ -159,6 +161,25 @@ export const SoundtrackSchema = z.object({
   offsetSec: z.number().nonnegative(),
 });
 export type Soundtrack = z.infer<typeof SoundtrackSchema>;
+
+/**
+ * Cut-to-beat settings (added in 0.2; absent in older files). Applies only while
+ * a soundtrack is chosen. See shared/beats.ts for how cuts are computed.
+ */
+export const BeatSyncSchema = z.object({
+  enabled: z.boolean(),
+  /** Default clip length in beats. */
+  beatsPerClip: z.number().int().min(1).max(32),
+  /** Index of the beat the film starts on (replaces the soundtrack start offset). */
+  startBeat: z.number().int().min(0).max(100_000),
+  /** Typed tempo; null = use the detected beats. */
+  bpm: z.number().min(30).max(300).nullable(),
+  /** Detected beats doubled (2, 4) or halved (0.5, 0.25). Ignored when bpm is set. */
+  scale: z.union([z.literal(0.25), z.literal(0.5), z.literal(1), z.literal(2), z.literal(4)]),
+  /** Shifts the whole grid, for detection that is consistently early or late. */
+  nudgeSec: z.number().min(-0.5).max(0.5),
+});
+export type BeatSync = z.infer<typeof BeatSyncSchema>;
 
 export const AspectRatioSchema = z.enum(["16:9", "1:1", "9:16"]);
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
@@ -172,6 +193,7 @@ export const FilmStateSchema = z.object({
   aspectRatio: AspectRatioSchema,
   /** Last-used generation settings for this film (shown in the left panel). */
   generationSettings: GenerationSettingsSchema,
+  beatSync: BeatSyncSchema.nullable().default(null),
 });
 export type FilmState = z.infer<typeof FilmStateSchema>;
 
@@ -237,6 +259,9 @@ export function validateTrim(trim: Trim, actualDurationSec: number): string | nu
   }
   return null;
 }
+
+/** Frame rate of every preview and export (cuts are placed on these frames). */
+export const VIDEO_FPS = 30;
 
 export const ASPECT_CANVAS: Record<AspectRatio, { width: number; height: number }> = {
   "16:9": { width: 1440, height: 810 },

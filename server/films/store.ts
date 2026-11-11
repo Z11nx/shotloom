@@ -107,6 +107,7 @@ export class FilmStore {
       soundtrack: null,
       aspectRatio: "16:9",
       generationSettings: this.opts.defaultSettings(),
+      beatSync: null,
     };
   }
 

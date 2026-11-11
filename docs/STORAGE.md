@@ -16,6 +16,7 @@
       generations/<id>.json            readable metadata per clip (no secrets)
       preview/preview-<n>.mp4          the latest preview only (disposable)
       tmp/                             render scratch (cleared automatically)
+      beats/<hash>.json                soundtrack beat analysis cache (disposable; rebuilt if deleted)
 ```
 
 Shotloom reads only files sitting directly in the film folder. Subfolders,
@@ -23,15 +24,19 @@ hidden files and symlinks are ignored.
 
 ## What `state.json` holds
 
-It is versioned JSON (`"version": 1`) containing:
+It is versioned JSON (`"version": 1`) containing the following. Files saved by
+v0.1.0 load unchanged in v0.2.0; the cut-to-beat fields are added as "off".
+An older Shotloom opening a newer file ignores those fields and drops them on
+its next save.
 
 - Prompt blocks, with their order and on/off state
 - Each shot's description
 - Every generation record: provider, model, request id, the requested
   settings, the submitted prompt, any provider-expanded prompt, status and
   errors, output info, and trim
-- Timeline order and per-clip mute
+- Timeline order, per-clip mute, and per-clip beat count (`beats`, null = film default)
 - Soundtrack and offset
+- Cut-to-beat settings (`beatSync`: on/off, beats per clip, start beat, tempo, nudge)
 - Aspect ratio
 - Last-used generation settings
 

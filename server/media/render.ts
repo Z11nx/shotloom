@@ -9,18 +9,23 @@
  * 3. Audio is encoded once (AAC) for the whole film — optionally mixed with the
  *    soundtrack — and faded out over min(3 s, half the film). The output length
  *    is pinned to the timeline length, so a short soundtrack never shortens the video.
+ *
+ * Cut to beat (shared/beats.ts): each clip is cut to an exact number of video
+ * frames computed from the song's beat times, starting at its in-point, and the
+ * soundtrack starts at the chosen start beat, so every cut lands on a beat.
  */
 import { existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ASPECT_CANVAS, effectiveTrim, findGeneration, validateTrim, type AspectRatio, type FilmState } from "../../shared/domain";
+import { activeBeatSync, availableFromIn, beatGrid, fitsSlot, planBeatCuts, type BeatAnalysis, type BeatPlan } from "../../shared/beats";
+import { ASPECT_CANVAS, VIDEO_FPS, effectiveTrim, findGeneration, validateTrim, type AspectRatio, type FilmState } from "../../shared/domain";
 import { AppError } from "../errors";
 import { filmDir, generationsDir } from "../films/layout";
 import { assertFileName, assertUnderRoot } from "../films/paths";
 import { runFfmpeg, type MediaTools } from "./ffmpeg";
 import { probeMedia, type ProbeResult } from "./probe";
 
-export const FPS = 30;
+export const FPS = VIDEO_FPS;
 
 export interface PlanClip {
   clipId: string;
@@ -28,6 +33,8 @@ export interface PlanClip {
   sourcePath: string;
   inSec: number;
   durationSec: number;
+  /** Beat mode: exact frame count for this segment (durationSec = frames / FPS). */
+  frames?: number;
   useClipAudio: boolean;
 }
 
@@ -47,8 +54,23 @@ export async function buildRenderPlan(
   state: FilmState,
   audioFiles: string[],
   tools: MediaTools,
+  beats: BeatAnalysis | null = null,
 ): Promise<RenderPlan> {
   const problems: string[] = [];
+  const sync = activeBeatSync(state);
+  let beatPlan: BeatPlan | null = null;
+  if (sync) {
+    if (!beats) {
+      problems.push("Cut to beat is on, but the soundtrack's beats are not available yet.");
+    } else {
+      const grid = beatGrid(beats, sync);
+      if (grid.times.length < 2 && sync.bpm === null) {
+        problems.push(`No beats were found in "${beats.filename}". Type a tempo (BPM) or turn off Cut to beat.`);
+      } else {
+        beatPlan = planBeatCuts(grid, sync, state.timeline, FPS);
+      }
+    }
+  }
   if (state.timeline.length === 0) problems.push("The timeline is empty. Add at least one clip.");
   const clips: PlanClip[] = [];
   // Every file the render will read must resolve inside the films root.
@@ -70,6 +92,17 @@ export async function buildRenderPlan(
     const trim = effectiveTrim(generation)!;
     const trimProblem = validateTrim(trim, generation.output.durationSec);
     if (trimProblem) return problems.push(`${name}: ${trimProblem}`);
+    const cut = beatPlan?.cuts[i];
+    if (cut) {
+      const slot = cut.frames / FPS;
+      if (!fitsSlot(generation, slot, FPS)) {
+        return problems.push(
+          `${name} has ${availableFromIn(generation).toFixed(1)}s of video from its in-point, but its ${cut.beats}-beat slot needs ${slot.toFixed(1)}s. Give it fewer beats or move its in-point earlier.`,
+        );
+      }
+      clips.push({ clipId: clip.id, label: name, sourcePath, inSec: trim.inSec, durationSec: slot, frames: cut.frames, useClipAudio: generation.output.hasAudio && !clip.muted });
+      return;
+    }
     const durationSec = Math.min(trim.outSec, generation.output.durationSec) - trim.inSec;
     if (durationSec < 1 / FPS) return problems.push(`${name}: the trimmed range is shorter than one frame.`);
     clips.push({
@@ -84,7 +117,9 @@ export async function buildRenderPlan(
 
   let soundtrack: RenderPlan["soundtrack"] = null;
   if (state.soundtrack) {
-    const { filename, offsetSec } = state.soundtrack;
+    const { filename } = state.soundtrack;
+    // In beat mode the film starts on the chosen beat; otherwise at the typed offset.
+    const offsetSec = beatPlan ? beatPlan.offsetSec : state.soundtrack.offsetSec;
     const p = await assertUnderRoot(root, path.join(filmDir(root, film), assertFileName(filename)));
     if (!audioFiles.includes(filename) || !existsSync(p)) {
       problems.push(`Soundtrack "${filename}" is no longer in the film folder. Choose another or none.`);
@@ -97,14 +132,19 @@ export async function buildRenderPlan(
       }
       if (info && !info.hasAudio) problems.push(`Soundtrack "${filename}" has no audio stream.`);
       else if (info && offsetSec >= info.durationSec) {
-        problems.push(`Soundtrack start (${offsetSec}s) is past the end of "${filename}" (${info.durationSec.toFixed(1)}s).`);
+        problems.push(
+          beatPlan
+            ? `The start beat (${offsetSec.toFixed(1)}s) is past the end of "${filename}" (${info.durationSec.toFixed(1)}s). Choose an earlier start beat.`
+            : `Soundtrack start (${offsetSec}s) is past the end of "${filename}" (${info.durationSec.toFixed(1)}s).`,
+        );
       } else if (info) soundtrack = { path: p, offsetSec };
     }
   }
 
   if (problems.length) throw new AppError(400, "TIMELINE_INVALID", problems.join(" "), { problems });
   const canvas = ASPECT_CANVAS[state.aspectRatio];
-  const totalSec = clips.reduce((sum, c) => sum + c.durationSec, 0);
+  // Beat mode: whole frames, so the total is exact (no float drift).
+  const totalSec = beatPlan ? clips.reduce((sum, c) => sum + (c.frames ?? 0), 0) / FPS : clips.reduce((sum, c) => sum + c.durationSec, 0);
   return { aspectRatio: state.aspectRatio, width: canvas.width, height: canvas.height, clips, totalSec, soundtrack };
 }
 
@@ -126,19 +166,24 @@ export async function renderPlan(
     for (const [i, clip] of plan.clips.entries()) {
       onStep(`Preparing ${clip.label} (${i + 1}/${plan.clips.length})`);
       const segName = `seg_${String(i).padStart(3, "0")}.mkv`;
-      const video = `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H},setsar=1,fps=${FPS},format=yuv420p[v]`;
+      // Beat mode needs exactly `frames` frames: read a little extra and pad by
+      // repeating the last frame if the source ends early, then stop at the count.
+      const exact = clip.frames !== undefined;
+      const pad = exact ? ",tpad=stop_mode=clone:stop_duration=0.5" : "";
+      const video = `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase:flags=bicubic,crop=${W}:${H},setsar=1,fps=${FPS}${pad},format=yuv420p[v]`;
       const audio = clip.useClipAudio
         ? `[0:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo,apad[a]`
         : `[1:a]anull[a]`;
       await runFfmpeg(tools, [
         "-ss", sec(clip.inSec),
-        "-t", sec(clip.durationSec),
+        "-t", sec(clip.durationSec + (exact ? 0.25 : 0)),
         "-i", clip.sourcePath,
         "-f", "lavfi",
         "-i", "anullsrc=r=48000:cl=stereo",
         "-filter_complex", `${video};${audio}`,
         "-map", "[v]",
         "-map", "[a]",
+        ...(exact ? ["-frames:v", String(clip.frames)] : []),
         "-t", sec(clip.durationSec),
         "-c:v", "libx264",
         "-preset", "veryfast",

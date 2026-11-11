@@ -8,6 +8,7 @@
  *   <films root>/<Film>/.shotloom/generations/      generated clips + metadata sidecars
  *   <films root>/<Film>/.shotloom/preview/          latest preview render (disposable)
  *   <films root>/<Film>/.shotloom/tmp/              render scratch (cleaned up)
+ *   <films root>/<Film>/.shotloom/beats/            soundtrack beat analysis cache (disposable)
  */
 import path from "node:path";
 
@@ -33,6 +34,9 @@ export function previewDir(root: string, film: string): string {
 }
 export function renderTmpDir(root: string, film: string): string {
   return path.join(metaDir(root, film), "tmp");
+}
+export function beatsDir(root: string, film: string): string {
+  return path.join(metaDir(root, film), "beats");
 }
 export function exportsDir(root: string, film: string): string {
   return path.join(root, film, "exports");

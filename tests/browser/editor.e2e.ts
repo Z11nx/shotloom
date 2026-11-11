@@ -11,6 +11,7 @@
  */
 import type { Page, Route } from "playwright-core";
 import path from "node:path";
+import { makeSong, wavBytes } from "../music";
 import {
   api,
   check,
@@ -848,6 +849,89 @@ scenario("live mode shows fal credits in the top bar, with clear fallbacks", asy
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await eventually("unavailable balance is shown as such", async () => ((await chip.textContent()) ?? "").includes("credits unavailable"));
   check((await chip.getAttribute("title"))!.includes("FAL_BILLING_KEY"), "tooltip explains how to enable credits");
+});
+
+// -----------------------------------------------------------------------------
+// Cut to beat
+// -----------------------------------------------------------------------------
+
+scenario("cut to beat: pace, per-clip beats, too-short warning, start beat, tempo, export on the beat", async ({ page, srv }) => {
+  const film = "Beat Film";
+  await makeFilm(srv, film, "b1.png");
+  await api(srv, "POST", `${filmUrl(film)}/shots/b1.png/generate`, { text: "beat", settings: { durationSec: 6, resolution: "768P", seed: null }, count: 4 });
+  await eventually("four mock clips finish", async () => {
+    const shots = (await getView(srv, film)).state.shots as Record<string, { generations: { status?: string }[] }>;
+    return shots["b1.png"]!.generations.length === 4 && shots["b1.png"]!.generations.every((g) => g.status === "completed");
+  }, 40_000);
+  const gens = ((await getView(srv, film)).state.shots as unknown as Record<string, { generations: { id: string }[] }>)["b1.png"]!.generations;
+  for (const g of gens) await api(srv, "POST", `${filmUrl(film)}/timeline`, { generationId: g.id });
+  await Bun.write(path.join(srv.root, film, "song.wav"), wavBytes(makeSong({ bpm: 120, durationSec: 20, leadInSec: 0.5 })));
+  await getView(srv, film);
+  await api(srv, "PUT", `${filmUrl(film)}/soundtrack`, { filename: "song.wav", offsetSec: 0 });
+
+  await page.setViewportSize({ width: 1774, height: 887 });
+  await page.goto(srv.base);
+  await openFilm(page, srv, film, "b1.png");
+  const toggle = page.getByLabel("Cut to beat");
+  const meta = page.locator(".timeline-meta");
+  check(!(await toggle.isChecked()), "cut to beat starts off");
+  check((await page.getByLabel("Soundtrack start offset in seconds").count()) === 1, "free start offset shown while off");
+
+  await toggle.click();
+  check(await toggle.isChecked(), "the checkbox responds immediately");
+  await page.locator(".beat-strip").waitFor({ timeout: 20_000 });
+  await eventually("the tempo is detected", async () => /· 1(19\.\d|20(\.\d)?) BPM$/.test(((await meta.textContent()) ?? "").trim()));
+  eq((await page.getByLabel("Soundtrack start offset in seconds").count()), 0, "the start beat replaces the free offset");
+  await eventually("4 clips × 4 beats at 120 BPM = 8 s", async () => ((await meta.textContent()) ?? "").includes("4 clips · 00:08"));
+  check(((await page.locator(".clip-beats").first().textContent()) ?? "").includes("· 00:02"), "a tile shows its beat slot (2 s)");
+  eq(await page.locator(".beat-seg").count(), 4, "one beat-map segment per clip");
+
+  // Faster pace for the whole film.
+  await page.getByLabel("Beats per clip").selectOption("2");
+  await eventually("2 beats per clip halves the film", async () => ((await meta.textContent()) ?? "").includes("4 clips · 00:04"));
+
+  // One clip gets a long slot it cannot fill: warned in the tile and the map, and export refuses with the reason.
+  await page.getByLabel("Beats for clip 2").selectOption("16");
+  await page.locator(".clip-short").waitFor();
+  eq(await page.locator(".beat-seg.is-short").count(), 1, "the beat map marks the short clip");
+  check((await page.locator(".clip-short").getByText("Too short").count()) === 1, "the tile says Too short");
+  await page.getByRole("button", { name: "Export" }).click();
+  await eventually("export is refused with a clear reason", async () => /Export not started:.*Give it fewer beats/.test((await page.locator(".toasts").textContent()) ?? ""));
+  await page.getByLabel("Beats for clip 2").selectOption("8");
+  await eventually("8 beats fit", async () => (await page.locator(".clip-short").count()) === 0);
+
+  // Start one beat later; double then halve the tempo.
+  const startLabel = page.getByRole("group", { name: "Start beat" }).locator(".tabular");
+  const before = (await startLabel.textContent()) ?? "";
+  check(before.startsWith("1 ·"), `starts on the first beat (${before})`);
+  await page.getByRole("button", { name: "Start one beat later" }).click();
+  await eventually("start beat moves", async () => ((await startLabel.textContent()) ?? "").startsWith("2 ·"));
+  await page.getByRole("button", { name: "Double tempo" }).click();
+  await eventually("double tempo", async () => /· 2[34]\d(\.\d)? BPM$/.test(((await meta.textContent()) ?? "").trim()));
+  await page.getByRole("button", { name: "Half tempo" }).click();
+  await eventually("back to the detected tempo", async () => /· 1(19\.\d|20(\.\d)?) BPM$/.test(((await meta.textContent()) ?? "").trim()));
+  await eventually("start beat is kept", async () => ((await startLabel.textContent()) ?? "").startsWith("2 ·"));
+
+  // Export: 2 + 8 + 2 + 2 beats = 14 beats = 7.0 s.
+  await page.getByRole("button", { name: "Export" }).click();
+  type R = { render: { state: string; output: { durationSec: number } | null } | null };
+  const renderOf = async () => ((await getView(srv, film)) as unknown as R).render;
+  await eventually("export finishes", async () => (await renderOf())?.state === "done", 120_000);
+  const out = (await renderOf())!.output!;
+  check(Math.abs(out.durationSec - 7) < 0.06, `export is 14 beats long (${out.durationSec}s)`);
+
+  // Settings are saved with the film.
+  await page.reload();
+  await openFilm(page, srv, film, "b1.png");
+  check(await page.getByLabel("Cut to beat").isChecked(), "cut to beat stays on after reload");
+  await page.locator(".beat-strip").waitFor({ timeout: 20_000 });
+  eq(await page.getByLabel("Beats for clip 2").inputValue(), "8", "per-clip beats are saved");
+
+  // Off again: back to normal clip lengths.
+  await page.getByLabel("Cut to beat").click();
+  await page.locator(".beat-strip").waitFor({ state: "detached" });
+  await eventually("the free offset returns", async () => (await page.getByLabel("Soundtrack start offset in seconds").count()) === 1);
+  check(!((await meta.textContent()) ?? "").includes("BPM"), "no tempo shown when off");
 });
 
 scenario("workflow preserved: generate, drag-trim, timeline reorder, export", async ({ page, srv }) => {

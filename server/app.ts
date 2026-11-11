@@ -19,6 +19,7 @@ import { buildRouter } from "./http/routes";
 import { openFolderInFileManager, type FolderOpener } from "./system/opener";
 import { StatusChecker } from "./system/status";
 import { FalBalance } from "./system/falBalance";
+import { BeatService } from "./media/beatService";
 import { resolveInside } from "./films/paths";
 
 export interface AppOverrides {
@@ -58,12 +59,14 @@ export function createApp(config: AppConfig, overrides: AppOverrides = {}): App 
     pollIntervalMs: overrides.pollIntervalMs,
     backoffBaseMs: overrides.backoffBaseMs,
   });
-  const renders = new RenderService(store, tools, log);
+  const beats = new BeatService(store, tools);
+  const renders = new RenderService(store, tools, log, beats);
   const status = new StatusChecker(config, generation);
   const router = buildRouter({
     store,
     generation,
     renders,
+    beats,
     status,
     falBalance: overrides.falBalance ?? new FalBalance(config),
     openFolder: overrides.openFolder ?? openFolderInFileManager,
